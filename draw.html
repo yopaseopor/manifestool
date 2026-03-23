@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draw Tool</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+        }
+        .container {
+            padding: 20px;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button.active {
+            background: #28a745;
+        }
+        #areaDisplay {
+            margin-top: 20px;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #areaSummary {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+        }
+        #personDisplay {
+            margin-top: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #densityControl {
+            margin-top: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .slider-container input {
+            flex: 1;
+        }
+        .slider-container span {
+            min-width: 40px;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h3>Draw Shapes</h3>
+        <div id="shapeButtons">
+            <button id="squareBtn" title="Square">□</button>
+            <button id="circleBtn" title="Circle">○</button>
+            <button id="triangleBtn" title="Triangle">△</button>
+            <button id="polygonBtn" title="Polygon">⬡</button>
+        </div>
+        <button id="drawBtn">Start Drawing</button>
+        <button id="finishBtn">Finish</button>
+        <button id="clearBtn">Clear</button>
+        <div id="areaDisplay">
+            <strong>Total Area:</strong> <span id="areaValue">0</span> square meters
+        </div>
+        <div id="densityControl">
+            <strong>Density:</strong>
+            <div class="slider-container">
+                <input type="range" id="densitySlider" min="0" max="5" step="0.1" value="0">
+                <span id="densityValue">0</span> p/m²
+            </div>
+        </div>
+        <div id="imageSection">
+            <img id="displayImage" src="img/0_st_jaume_buida.png" alt="St Jaume Image" style="max-width: 100%; height: auto; margin-bottom: 10px;">
+        </div>
+        <div id="personDisplay">
+            <strong>Person Capacity:</strong> <span id="personValue">0</span> people
+        </div>
+        <div id="areaSummary">
+            <strong>Area Summary:</strong>
+            <div id="areaDetails"></div>
+        </div>
+    <script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
+    <script src="draw.js"></script>
+</body>
+</html>

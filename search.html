@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Results</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.css">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            height: 100%;
+        }
+        .sidebar {
+            width: 300px;
+            background: #f4f4f4;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .main {
+            flex: 1;
+        }
+        #results {
+            list-style: none;
+            padding: 0;
+        }
+        #results li {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            cursor: pointer;
+        }
+        #results li:hover {
+            background: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h3>Search Results</h3>
+            <input type="text" id="searchInput" placeholder="Enter location">
+            <button id="searchBtn">Search</button>
+            <ul id="results"></ul>
+        </div>
+        <div class="main" id="map"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.js"></script>
+    <script src="search.js"></script>
+</body>
+</html>
