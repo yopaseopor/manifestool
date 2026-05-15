@@ -5,6 +5,59 @@ let waypointCounter = 1;
 let draggedElement = null;
 let draggedIndex = null;
 
+// Reverse geocode using Nominatim
+async function reverseGeocode(lat, lon) {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data || !data.address) return null;
+    
+    const addr = data.address;
+    const parts = [];
+    if (addr.house_number) parts.push(addr.house_number);
+    if (addr.road || addr.pedestrian || addr.footway) parts.push(addr.road || addr.pedestrian || addr.footway);
+    
+    let street = parts.join(' ');
+    let place = addr.city || addr.town || addr.village || addr.municipality || addr.county || '';
+    let displayName = data.display_name || '';
+    
+    // Include municipality in the address
+    let municipality = addr.municipality || addr.city || addr.town || addr.village || addr.county || '';
+    
+    // Build a compact address string
+    let addressStr = '';
+    if (street) addressStr += street;
+    if (municipality) {
+      if (addressStr) addressStr += ', ';
+      addressStr += municipality;
+    }
+    
+    return {
+      street: street,
+      city: place,
+      municipality: municipality,
+      display_name: displayName,
+      full: addressStr || `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+    };
+  } catch (e) {
+    console.error('Reverse geocode error:', e);
+    return null;
+  }
+}
+
+// Compute sequential order numbers for waypoints: start=1, intermediate=2..N-1, end=N
+function getWaypointOrderNumbers() {
+  const numbers = {};
+  waypoints.forEach((wp, idx) => {
+    numbers[wp.id != null ? wp.id : idx] = idx + 1; // 1-based sequential
+  });
+  return numbers;
+}
+
 // Update waypoint UI
 function updateWaypointUI() {
   const waypointList = document.getElementById('waypointList');
@@ -19,18 +72,30 @@ function updateWaypointUI() {
     waypointList.setAttribute('data-dragover-added', 'true');
   }
 
+  const orderNumbers = getWaypointOrderNumbers();
+
   waypoints.forEach((waypoint, index) => {
+    const orderNum = orderNumbers[waypoint.id];
     const div = document.createElement('div');
     div.className = 'waypoint-item';
     div.draggable = true;
     div.dataset.index = index;
 
-    div.draggable = true;
     div.setAttribute('data-id', waypoint.id);
 
+    const typeName = waypoint.type === 'waypoint' ? 'Waypoint' : waypoint.type.charAt(0).toUpperCase() + waypoint.type.slice(1);
+    let addrParts = [];
+    if (waypoint.address) {
+      if (waypoint.address.street) addrParts.push(waypoint.address.street);
+      if (waypoint.address.municipality) addrParts.push(waypoint.address.municipality);
+    }
+    const addressText = addrParts.length > 0 ? addrParts.join(', ') : '';
     div.innerHTML = `
-      <span>${waypoint.type === 'waypoint' ? 'Waypoint ' + waypoint.id : waypoint.type.charAt(0).toUpperCase() + waypoint.type.slice(1)}: ${waypoint.lat.toFixed(6)}, ${waypoint.lon.toFixed(6)}</span>
-      ${waypoint.type === 'waypoint' ? '<button onclick="removeWaypoint(' + index + ')">×</button>' : ''}
+      <div style="flex:1; min-width:0; padding-right: 4px;">
+        <div style="font-weight: bold; font-size: 12px;">#${orderNum} ${typeName}${addressText ? ': ' + addressText : ''}</div>
+        <div style="font-size: 10px; color: #888;">${waypoint.lat.toFixed(5)}, ${waypoint.lon.toFixed(5)}</div>
+      </div>
+      ${waypoint.type === 'waypoint' ? '<button onclick="removeWaypoint(' + index + ')" style="flex-shrink: 0; margin-left: 4px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">×</button>' : ''}
     `;
 
     div.addEventListener('dragstart', function(event) {
@@ -67,10 +132,14 @@ function removeWaypoint(index) {
 
 // Update map markers
 function updateMapMarkers() {
-  // Send waypoints to parent window
+  const orderNumbers = getWaypointOrderNumbers();
+  // Send waypoints with order numbers to parent window
   window.parent.postMessage({
     type: 'updateMarkers',
-    waypoints: waypoints
+    waypoints: waypoints.map(wp => ({
+      ...wp,
+      order: orderNumbers[wp.id]
+    }))
   }, '*');
 }
 
@@ -260,12 +329,12 @@ async function calculateRoute() {
     console.log('API URL profile:', profile);
     console.log('Coordinate string:', coordString);
 
-    // Get route from OSRM
+    // Get route from OSRM (steps=true to get turn-by-turn instructions)
     let routeResponse;
     if (transportMode === 'foot') {
-      routeResponse = await fetch(`http://routing.openstreetmap.de/routed-foot/route/v1/${profile}/${coordString}?overview=full&geometries=polyline`);
+      routeResponse = await fetch(`http://routing.openstreetmap.de/routed-foot/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`);
     } else {
-      routeResponse = await fetch(`https://router.project-osrm.org/route/v1/${profile}/${coordString}?overview=full&geometries=polyline`);
+      routeResponse = await fetch(`https://router.project-osrm.org/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`);
     }
 
     console.log('Route response status:', routeResponse.status);
@@ -296,15 +365,61 @@ async function calculateRoute() {
       waypointCount: waypointCoords.length
     }, '*');
 
-    // Update route info display directly
+    // Update route info display directly with steps
     const distance = (route.distance / 1000).toFixed(2);
     const duration = Math.round(route.duration / 60);
+    let stepsHtml = '';
+    if (route.legs && route.legs[0] && route.legs[0].steps) {
+      stepsHtml = '<h4 style="margin-top:10px;margin-bottom:5px;">Directions</h4>';
+      stepsHtml += '<ol style="margin:0;padding-left:18px;font-size:12px;">';
+      route.legs[0].steps.forEach((step, si) => {
+        const stepDist = (step.distance).toFixed(0);
+        const stepDur = Math.round(step.duration);
+        const instruction = step.maneuver ? step.maneuver.instruction : step.name || '';
+        const maneuverType = step.maneuver ? step.maneuver.type : null;
+        const mod = step.maneuver ? (step.maneuver.modifier || '') : '';
+        const streetName = step.name || step.ref || '';
+        
+        // Build icon
+        let icon = '➡️ ';
+        if (maneuverType === 'depart') icon = '🟢 ';
+        else if (maneuverType === 'arrive') icon = '🔴 ';
+        else if (maneuverType === 'turn' && mod) icon = mod.includes('left') ? '⬅️ ' : '➡️ ';
+        else if (maneuverType === 'roundabout' || maneuverType === 'rotary') icon = '🔄 ';
+        else if (maneuverType === 'merge') icon = '🔀 ';
+        else if (maneuverType === 'fork') icon = '↗️ ';
+        else if (maneuverType === 'end of road') icon = '↪️ ';
+        
+        // Build description
+        let description = '';
+        if (maneuverType === 'depart') {
+          description = `Head ${mod || 'forward'} on ${streetName || 'the road'}`;
+        } else if (maneuverType === 'arrive') {
+          description = `Arrive at destination`;
+        } else if (maneuverType === 'roundabout') {
+          const exit = step.maneuver.exit || 1;
+          description = `Take exit ${exit} toward ${streetName || 'the road'}`;
+        } else if (maneuverType === 'turn') {
+          description = `Turn ${mod} onto ${streetName || 'the road'}`;
+        } else if (maneuverType === 'continue') {
+          description = `Continue onto ${streetName || 'the road'}`;
+        } else if (streetName) {
+          description = instruction || `Continue on ${streetName}`;
+        } else {
+          description = instruction || 'Continue';
+        }
+        stepsHtml += `<li>${icon}${description} <span style="color:#888;font-size:10px;">(${stepDist}m)</span></li>`;
+      });
+      stepsHtml += '</ol>';
+    }
+    
     document.getElementById('routeInfo').innerHTML = `
-      <h4>Route Details</h4>
-      <p>Distance: ${distance} km</p>
-      <p>Estimated time: ${duration} minutes</p>
-      <p>Transport: ${transportMode.charAt(0).toUpperCase() + transportMode.slice(1)}</p>
-      <p>Waypoints: ${waypointCoords.length}</p>
+      <div style="margin-bottom:8px;">
+        <strong>Route Details</strong><br>
+        <span style="font-size:13px;">Distance: ${distance} km &middot; ${duration} min</span><br>
+        <span style="font-size:12px;color:#666;">${transportMode.charAt(0).toUpperCase() + transportMode.slice(1)} &middot; ${waypointCoords.length} waypoints</span>
+      </div>
+      ${stepsHtml}
     `;
 
     console.log('Route calculation completed successfully');
@@ -321,11 +436,158 @@ window.addEventListener('message', function(event) {
 
   switch(data.type) {
     case 'mapClick':
-      handleMapClick(data.coordinate);
+      handleMapClick(data.lonLat);
       break;
 
     case 'updateRouteInfo':
       updateRouteInfo(data);
+      break;
+
+    case 'loadWaypoints':
+      waypoints = data.waypoints.map(waypoint => ({
+        ...waypoint,
+        lat: parseFloat(waypoint.lat),
+        lon: parseFloat(waypoint.lon)
+      }));
+      // Assign unique IDs if missing (for backward compatibility with shared URLs without ids)
+      let maxId = 0;
+      waypoints.forEach(wp => {
+        if (wp.id && !isNaN(wp.id)) {
+          if (wp.id > maxId) maxId = wp.id;
+        }
+      });
+      waypointCounter = maxId + 1;
+      waypoints.forEach(wp => {
+        if (!wp.id || isNaN(wp.id)) {
+          wp.id = waypointCounter++;
+        }
+      });
+      // Reset waypoint counter after all IDs are assigned
+      maxId = 0;
+      waypoints.forEach(wp => { if (wp.id > maxId) maxId = wp.id; });
+      waypointCounter = maxId + 1;
+      updateWaypointUI();
+      updateMapMarkers();
+      
+      // Populate input fields
+      const startWaypoint = waypoints.find(w => w.type === 'start');
+      const endWaypoint = waypoints.find(w => w.type === 'end');
+      if (startWaypoint) {
+        document.getElementById('startInput').value = `${startWaypoint.lat.toFixed(6)}, ${startWaypoint.lon.toFixed(6)}`;
+      }
+      if (endWaypoint) {
+        document.getElementById('endInput').value = `${endWaypoint.lat.toFixed(6)}, ${endWaypoint.lon.toFixed(6)}`;
+      }
+      
+      // Auto-calculate route after loading waypoints
+      setTimeout(() => {
+        calculateRoute();
+      }, 100);
+      
+      // Geocode all waypoints asynchronously
+      waypoints.forEach(wp => {
+        if (!wp.address) {
+          reverseGeocode(wp.lat, wp.lon).then(addr => {
+            if (addr) {
+              wp.address = addr;
+              updateWaypointUI();
+              const inputVal = addr.street || addr.city || addr.full;
+              if (wp.type === 'start') {
+                document.getElementById('startInput').value = inputVal;
+              } else if (wp.type === 'end') {
+                document.getElementById('endInput').value = inputVal;
+              }
+            }
+          });
+        }
+      });
+      break;
+      
+    case 'moveWaypoint':
+      // A routing marker was dragged on the map
+      const movedId = data.waypointId;
+      // Match by ID first (for waypoints), or by type (for start/end which are unique)
+      let movedWaypoint;
+      if (movedId) {
+        movedWaypoint = waypoints.find(w => w.id === movedId);
+      }
+      if (!movedWaypoint) {
+        movedWaypoint = waypoints.find(w => w.type === data.waypointType);
+      }
+      if (movedWaypoint) {
+        movedWaypoint.lon = data.lon;
+        movedWaypoint.lat = data.lat;
+        
+        // Update the input field
+        if (data.waypointType === 'start') {
+          document.getElementById('startInput').value = `${data.lat.toFixed(6)}, ${data.lon.toFixed(6)}`;
+        } else if (data.waypointType === 'end') {
+          document.getElementById('endInput').value = `${data.lat.toFixed(6)}, ${data.lon.toFixed(6)}`;
+        }
+        
+        updateWaypointUI();
+        updateMapMarkers();
+        
+        // Fetch address for the new position
+        reverseGeocode(data.lat, data.lon).then(addr => {
+          if (addr) {
+            movedWaypoint.address = addr;
+            updateWaypointUI();
+            const inputVal = addr.street || addr.city || addr.full;
+            if (data.waypointType === 'start') {
+              document.getElementById('startInput').value = inputVal;
+            } else if (data.waypointType === 'end') {
+              document.getElementById('endInput').value = inputVal;
+            }
+          }
+        });
+        
+        // Clear existing route and recalculate
+        window.parent.postMessage({ type: 'clearRoute' }, '*');
+        const hasStart = waypoints.some(w => w.type === 'start');
+        const hasEnd = waypoints.some(w => w.type === 'end');
+        if (hasStart && hasEnd) {
+          calculateRoute();
+        }
+      }
+      break;
+      
+    case 'removeWaypointAt':
+      // User clicked a marker on the map to delete it
+      const removeId = data.waypointId;
+      let removeIndex;
+      if (removeId) {
+        removeIndex = waypoints.findIndex(w => w.id === removeId);
+      } else {
+        // Fallback: match by coordinates and type (backward compatibility)
+        const clickLon = data.lon;
+        const clickLat = data.lat;
+        const clickType = data.waypointType;
+        removeIndex = waypoints.findIndex(w =>
+          w.type === clickType &&
+          Math.abs(w.lon - clickLon) < 0.00001 &&
+          Math.abs(w.lat - clickLat) < 0.00001
+        );
+      }
+      
+      if (removeIndex !== -1) {
+        const removed = waypoints[removeIndex];
+        waypoints.splice(removeIndex, 1);
+        
+        // Clear the corresponding input field
+        if (removed.type === 'start') {
+          document.getElementById('startInput').value = '';
+        } else if (removed.type === 'end') {
+          document.getElementById('endInput').value = '';
+        }
+        
+        updateWaypointUI();
+        updateMapMarkers();
+        
+        // Clear existing route
+        window.parent.postMessage({ type: 'clearRoute' }, '*');
+        document.getElementById('routeInfo').innerHTML = '';
+      }
       break;
   }
 });
@@ -334,23 +596,26 @@ window.addEventListener('message', function(event) {
 function handleMapClick(coordinate) {
   const [lon, lat] = coordinate;
 
+  let newWaypoint = null;
+  
   if (clickMode === 'start') {
     // Remove existing start
     waypoints = waypoints.filter(w => w.type !== 'start');
-    waypoints.unshift({type: 'start', id: waypointCounter++, lon: lon, lat: lat});
-    document.getElementById('startInput').value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+    newWaypoint = {type: 'start', id: waypointCounter++, lon: lon, lat: lat};
+    waypoints.unshift(newWaypoint);
   } else if (clickMode === 'end') {
     // Remove existing end
     waypoints = waypoints.filter(w => w.type !== 'end');
-    waypoints.push({type: 'end', id: waypointCounter++, lon: lon, lat: lat});
-    document.getElementById('endInput').value = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+    newWaypoint = {type: 'end', id: waypointCounter++, lon: lon, lat: lat};
+    waypoints.push(newWaypoint);
   } else if (clickMode === 'waypoint') {
-    waypoints.splice(waypoints.length - (waypoints.some(w => w.type === 'end') ? 1 : 0), 0, {
+    newWaypoint = {
       type: 'waypoint',
       id: waypointCounter++,
       lon: lon,
       lat: lat
-    });
+    };
+    waypoints.splice(waypoints.length - (waypoints.some(w => w.type === 'end') ? 1 : 0), 0, newWaypoint);
   }
 
   updateWaypointUI();
@@ -361,6 +626,24 @@ function handleMapClick(coordinate) {
   document.querySelectorAll('.waypoint-controls button').forEach(btn => {
     btn.classList.remove('active');
   });
+  
+  // Fetch address asynchronously
+  if (newWaypoint) {
+    reverseGeocode(lat, lon).then(addr => {
+      if (addr) {
+        newWaypoint.address = addr;
+        updateWaypointUI();
+        
+        // Update the input field with the address
+        const inputVal = addr.street || addr.city || addr.full;
+        if (newWaypoint.type === 'start') {
+          document.getElementById('startInput').value = inputVal;
+        } else if (newWaypoint.type === 'end') {
+          document.getElementById('endInput').value = inputVal;
+        }
+      }
+    });
+  }
 }
 
 // Update route info display

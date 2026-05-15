@@ -1,10 +1,38 @@
 // Draw tool functionality
 let drawInteraction = null;
+let modifyInteraction = null;
 let sketch = null;
 let isDrawing = false;
+let isModifying = false;
 let drawnPolygons = [];
 let polygonCounter = 1;
 let selectedShape = 'Polygon'; // Default shape
+let useFeet = false; // Unit preference: false = meters, true = feet
+
+// Conversion functions
+function metersToFeet(meters) {
+  return meters * 3.28084;
+}
+
+function squareMetersToSquareFeet(sqm) {
+  return sqm * 10.7639;
+}
+
+// Geodesic area calculation — uses the true spherical area, not the projected one
+function getGeodesicArea(geometry) {
+  if (geometry.getType() === 'Circle') {
+    // Convert circle to a 64-segment polygon for accurate geodesic area
+    const circlePolygon = ol.geom.Polygon.fromCircle(geometry, 64);
+    return ol.sphere.getArea(circlePolygon);
+  }
+  return ol.sphere.getArea(geometry);
+}
+
+// Geodesic distance between two projected coordinates
+function getGeodesicDistance(coord1, coord2) {
+  const line = new ol.geom.LineString([coord1, coord2]);
+  return ol.sphere.getLength(line);
+}
 
 function setActiveShape(activeId) {
   // Remove active class from all shape buttons
@@ -69,11 +97,15 @@ function startDrawing(shapeType) {
       if (geometry.getType() === 'Circle') {
         const center = geometry.getCenter();
         const radius = geometry.getRadius();
-        const radiusKm = (radius / 1000).toFixed(2); // Convert to km for readability
+        // Convert projected radius to geodesic distance
+        const edgeCoord = [center[0] + radius, center[1]];
+        const geodesicRadius = getGeodesicDistance(center, edgeCoord);
+        const displayRadius = useFeet ? metersToFeet(geodesicRadius).toFixed(2) : geodesicRadius.toFixed(2);
+        const unit = useFeet ? 'ft' : 'm';
         
         styles.push(new ol.style.Style({
           text: new ol.style.Text({
-            text: `Radius: ${radiusKm} km`,
+            text: `Radius: ${displayRadius} ${unit}`,
             fill: new ol.style.Fill({color: 'black'}),
             stroke: new ol.style.Stroke({color: 'white', width: 3}),
             font: 'bold 12px Arial',
@@ -89,17 +121,18 @@ function startDrawing(shapeType) {
             const start = coordinates[i];
             const end = coordinates[i + 1];
             
-            // Calculate distance in meters
-            const distance = Math.sqrt(Math.pow(end[0] - start[0], 2) + Math.pow(end[1] - start[1], 2));
-            const distanceKm = (distance / 1000).toFixed(2);
-            
             // Midpoint for text placement
             const midX = (start[0] + end[0]) / 2;
             const midY = (start[1] + end[1]) / 2;
             
+            // Calculate geodesic distance in meters
+            const distance = getGeodesicDistance(start, end);
+            const displayDistance = useFeet ? metersToFeet(distance).toFixed(2) : distance.toFixed(2);
+            const unit = useFeet ? 'ft' : 'm';
+            
             styles.push(new ol.style.Style({
               text: new ol.style.Text({
-                text: `${distanceKm} km`,
+                text: `${displayDistance} ${unit}`,
                 fill: new ol.style.Fill({color: 'black'}),
                 stroke: new ol.style.Stroke({color: 'white', width: 2}),
                 font: 'bold 11px Arial',
@@ -108,6 +141,20 @@ function startDrawing(shapeType) {
               geometry: new ol.geom.Point([midX, midY])
             }));
           }
+        }
+        
+        // Add polygon number label if this is a saved polygon
+        const polygonData = drawnPolygons.find(p => p.geometry === geometry);
+        if (polygonData) {
+          styles.push(new ol.style.Style({
+            text: new ol.style.Text({
+              text: polygonData.number.toString(),
+              fill: new ol.style.Fill({color: 'black'}),
+              stroke: new ol.style.Stroke({color: 'white', width: 3}),
+              font: 'bold 16px Arial',
+              placement: 'point'
+            })
+          }));
         }
       }
       
@@ -122,17 +169,6 @@ function startDrawing(shapeType) {
   drawInteraction.on('drawend', function(event) {
     const geometry = event.feature.getGeometry();
     let coordinates = geometry.getCoordinates();
-    
-    // Calculate area immediately after drawing
-    let shapeArea;
-    if (typeof geometry.getArea === 'function') {
-      shapeArea = geometry.getArea();
-    } else if (typeof geometry.getRadius === 'function') {
-      const radius = geometry.getRadius();
-      shapeArea = Math.PI * radius * radius;
-    } else {
-      shapeArea = 0;
-    }
     
     // Apply shape constraints
     if (currentShapeType === 'Polygon') {
@@ -220,16 +256,15 @@ function startDrawing(shapeType) {
       }));
       // Remove the hole from the parent polygon area calculation
       if (parentPolygon) {
-        let holeArea;
-        if (typeof geometry.getArea === 'function') {
-          holeArea = geometry.getArea();
-        } else if (typeof geometry.getRadius === 'function') {
-          const radius = geometry.getRadius();
-          holeArea = Math.PI * radius * radius;
-        } else {
+        let holeArea = getGeodesicArea(geometry);
+        if (isNaN(holeArea) || holeArea <= 0) {
           holeArea = 0;
         }
-        parentPolygon.holes.push(holeArea);
+        // Store hole with geometry so we can display edge measures later
+        parentPolygon.holes.push({
+          area: holeArea,
+          geometry: geometry.clone()
+        });
       }
     } else {
       // This is a new outer polygon (either separate or containing holes)
@@ -276,66 +311,289 @@ function finishDrawing() {
   }
 }
 
+// ---- Modify / Vertex mode ----
+
+// Vertex style: small circles at each vertex
+function createVertexStyle() {
+  return new ol.style.Style({
+    image: new ol.style.Circle({
+      radius: 5,
+      fill: new ol.style.Fill({color: '#ffcc00'}),
+      stroke: new ol.style.Stroke({color: '#cc9900', width: 2})
+    }),
+    geometry: function(feature) {
+      const geom = feature.getGeometry();
+      if (!geom) return null;
+      if (geom.getType() === 'Polygon') {
+        const coords = geom.getCoordinates()[0];
+        return new ol.geom.MultiPoint(coords);
+      } else if (geom.getType() === 'Circle') {
+        const center = geom.getCenter();
+        const radius = geom.getRadius();
+        // Show one handle on the circle edge for interactive radius adjustment
+        return new ol.geom.MultiPoint([center, [center[0] + radius, center[1]]]);
+      }
+      return null;
+    }
+  });
+}
+
+function startModify() {
+  if (isDrawing) {
+    finishDrawing();
+  }
+  if (isModifying) return;
+  
+  // Remove any existing modify interaction
+  if (modifyInteraction) {
+    window.parent.map.removeInteraction(modifyInteraction);
+  }
+  
+  // Add vertex style to all drawn features
+  const vertexStyle = createVertexStyle();
+  window.parent.vectorSource.getFeatures().forEach(feature => {
+    const existingStyle = feature.getStyle();
+    if (existingStyle && !Array.isArray(existingStyle)) {
+      feature.setStyle([existingStyle, vertexStyle]);
+    } else if (Array.isArray(existingStyle)) {
+      const hasVertexStyle = existingStyle.some(s => s.getImage() && s.getImage().getRadius && s.getImage().getRadius() === 5);
+      if (!hasVertexStyle) {
+        feature.setStyle([...existingStyle, vertexStyle]);
+      }
+    } else {
+      feature.setStyle([vertexStyle]);
+    }
+  });
+  
+  modifyInteraction = new ol.interaction.Modify({
+    source: window.parent.vectorSource,
+    pixelTolerance: 10,
+    style: new ol.style.Style({
+      image: new ol.style.Circle({
+        radius: 6,
+        fill: new ol.style.Fill({color: '#ff6600'}),
+        stroke: new ol.style.Stroke({color: '#cc4400', width: 2})
+      })
+    })
+  });
+  
+  // When modification ends, recalculate everything
+  modifyInteraction.on('modifyend', function(event) {
+    console.log('Modify end — recalculating areas');
+    
+    // Update drawnPolygons geometries to match the modified features
+    const modifiedFeatures = event.features.getArray();
+    modifiedFeatures.forEach(feature => {
+      const newGeom = feature.getGeometry();
+      // Find matching polygon in drawnPolygons and update its geometry reference
+      for (let dp of drawnPolygons) {
+        if (dp.feature === feature) {
+          dp.geometry = newGeom;
+          // Also re-assign vertex style after modification
+          const existing = feature.getStyle();
+          if (Array.isArray(existing)) {
+            const noVertex = existing.filter(s => !(s.getImage() && s.getImage().getRadius && s.getImage().getRadius() === 5));
+            feature.setStyle([...noVertex, createVertexStyle()]);
+          }
+          break;
+        }
+      }
+    });
+    
+    // Recalculate and update display
+    updateTotalArea();
+  });
+  
+  window.parent.map.addInteraction(modifyInteraction);
+  isModifying = true;
+  document.getElementById('modifyBtn').classList.add('active');
+}
+
+function stopModify() {
+  if (!isModifying) return;
+  
+  if (modifyInteraction) {
+    window.parent.map.removeInteraction(modifyInteraction);
+    modifyInteraction = null;
+  }
+  
+  // Remove vertex style from all features
+  window.parent.vectorSource.getFeatures().forEach(feature => {
+    const existingStyle = feature.getStyle();
+    if (Array.isArray(existingStyle)) {
+      const cleanStyles = existingStyle.filter(s => !(s.getImage() && s.getImage().getRadius && s.getImage().getRadius() === 5));
+      feature.setStyle(cleanStyles.length === 1 ? cleanStyles[0] : cleanStyles);
+    }
+  });
+  
+  isModifying = false;
+  document.getElementById('modifyBtn').classList.remove('active');
+}
+
+function toggleModify() {
+  if (isModifying) {
+    stopModify();
+  } else {
+    startModify();
+  }
+}
+
+// Modify button handler
+document.getElementById('modifyBtn').addEventListener('click', toggleModify);
+
+// ---- End Modify / Vertex ----
+
 function isPointInPolygon(point, polygon) {
   const x = point[0], y = point[1];
   let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
+  
+  // Ensure polygon is closed
+  const poly = [...polygon];
+  if (poly.length > 0 && (poly[0][0] !== poly[poly.length-1][0] || poly[0][1] !== poly[poly.length-1][1])) {
+    poly.push(poly[0]); // Close the polygon if not already closed
+  }
+  
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    
     if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
       inside = !inside;
     }
   }
+  
   return inside;
 }
 
+function isPolygonClockwise(coordinates) {
+  // Calculate the sum of (x2 - x1) * (y2 + y1) for all edges
+  let sum = 0;
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const x1 = coordinates[i][0];
+    const y1 = coordinates[i][1];
+    const x2 = coordinates[i + 1][0];
+    const y2 = coordinates[i + 1][1];
+    sum += (x2 - x1) * (y2 + y1);
+  }
+  return sum > 0; // Positive sum means clockwise
+}
+
 function updateTotalArea() {
+  console.log('UPDATE TOTAL AREA CALLED - drawnPolygons length:', drawnPolygons.length);
   let totalArea = 0;
   let summaryHtml = '';
   
   for (let i = 0; i < drawnPolygons.length; i++) {
     const polygon = drawnPolygons[i];
     let polygonArea;
+    let edgeLabels = '';
+    const lengthUnit = useFeet ? 'ft' : 'm';
     
     if (polygon.geometry.getType() === 'Polygon') {
-      polygonArea = polygon.geometry.getArea();
+      // Use geodesic area (true spherical area in square meters)
+      polygonArea = getGeodesicArea(polygon.geometry);
+      console.log(`Polygon ${i + 1} area:`, polygonArea, 'coordinates:', polygon.geometry.getCoordinates());
+      
+      // If NaN, fall back to 0
+      if (isNaN(polygonArea) || polygonArea <= 0) {
+        console.error(`Invalid area for polygon ${i + 1}:`, polygonArea);
+        polygonArea = 0;
+      }
+      
+      // Calculate edge distances for the summary
+      const coords = polygon.geometry.getCoordinates()[0];
+      if (coords.length > 1) {
+        const edgeLengths = [];
+        for (let e = 0; e < coords.length - 1; e++) {
+          const dist = getGeodesicDistance(coords[e], coords[e + 1]);
+          const displayDist = useFeet ? metersToFeet(dist).toFixed(2) : dist.toFixed(2);
+          edgeLengths.push(`${displayDist} ${lengthUnit}`);
+        }
+        edgeLabels = `Edges: ${edgeLengths.join(', ')}<br>`;
+      }
     } else if (polygon.geometry.getType() === 'Circle') {
+      // Use geodesic area for circles
+      polygonArea = getGeodesicArea(polygon.geometry);
+      if (isNaN(polygonArea) || polygonArea <= 0) {
+        polygonArea = 0;
+      }
+      
+      // Calculate geodesic radius for the summary
+      const center = polygon.geometry.getCenter();
       const radius = polygon.geometry.getRadius();
-      polygonArea = Math.PI * radius * radius;
+      const edgeCoord = [center[0] + radius, center[1]];
+      const geodesicRadius = getGeodesicDistance(center, edgeCoord);
+      const displayRadius = useFeet ? metersToFeet(geodesicRadius).toFixed(2) : geodesicRadius.toFixed(2);
+      edgeLabels = `Radius: ${displayRadius} ${lengthUnit}<br>`;
     } else {
       polygonArea = 0; // Fallback
     }
     
     let holeTotal = 0;
     
+    const displayArea = useFeet ? squareMetersToSquareFeet(polygonArea).toFixed(2) : polygonArea.toFixed(2);
+    const displayUnit = useFeet ? 'sqft' : 'sqm';
+    
     summaryHtml += `<div style="margin: 8px 0; padding: 8px; background: #f8f9fa; border-radius: 4px;">`;
-    summaryHtml += `<strong>Polygon ${polygon.number}:</strong> ${polygonArea.toFixed(2)} sqm`;
+    summaryHtml += `<strong>Polygon ${polygon.number}:</strong> ${displayArea} ${displayUnit}<br>`;
+    summaryHtml += `<span style="font-size: 11px; color: #666;">${edgeLabels}`;
     
     if (polygon.holes.length > 0) {
-      summaryHtml += ` (holes: `;
       for (let j = 0; j < polygon.holes.length; j++) {
-        const holeArea = polygon.holes[j];
+        const hole = polygon.holes[j];
+        const holeArea = hole.area;
+        const displayHoleArea = useFeet ? squareMetersToSquareFeet(holeArea).toFixed(2) : holeArea.toFixed(2);
         holeTotal += holeArea;
-        summaryHtml += `-${holeArea.toFixed(2)}`;
-        if (j < polygon.holes.length - 1) summaryHtml += ', ';
+        console.log(`Subtracting hole ${j + 1}: ${holeArea} sqm from polygon ${polygon.number}`);
+        
+        // Show hole type, edges, and area
+        const holeGeom = hole.geometry;
+        if (holeGeom.getType() === 'Polygon') {
+          const holeCoords = holeGeom.getCoordinates()[0];
+          const holeEdgeLengths = [];
+          for (let e = 0; e < holeCoords.length - 1; e++) {
+            const dist = getGeodesicDistance(holeCoords[e], holeCoords[e + 1]);
+            const displayDist = useFeet ? metersToFeet(dist).toFixed(2) : dist.toFixed(2);
+            holeEdgeLengths.push(`${displayDist} ${lengthUnit}`);
+          }
+          summaryHtml += `&nbsp;&nbsp;Hole ${j + 1}: edges [${holeEdgeLengths.join(', ')}], area -${displayHoleArea} ${displayUnit}<br>`;
+        } else if (holeGeom.getType() === 'Circle') {
+          const center = holeGeom.getCenter();
+          const radius = holeGeom.getRadius();
+          const edgeCoord = [center[0] + radius, center[1]];
+          const geodesicRadius = getGeodesicDistance(center, edgeCoord);
+          const displayRadius = useFeet ? metersToFeet(geodesicRadius).toFixed(2) : geodesicRadius.toFixed(2);
+          summaryHtml += `&nbsp;&nbsp;Hole ${j + 1}: radius ${displayRadius} ${lengthUnit}, area -${displayHoleArea} ${displayUnit}<br>`;
+        }
       }
-      summaryHtml += `)`;
     }
     
     const netArea = polygonArea - holeTotal;
-    summaryHtml += ` = ${netArea.toFixed(2)} sqm net</div>`;
+    const displayNetArea = useFeet ? squareMetersToSquareFeet(netArea).toFixed(2) : netArea.toFixed(2);
+    console.log(`Polygon ${polygon.number}: ${polygonArea.toFixed(2)} - ${holeTotal.toFixed(2)} = ${netArea.toFixed(2)} net area`);
+    summaryHtml += `Net area: ${displayNetArea} ${displayUnit}</span></div>`;
     totalArea += netArea;
   }
   
-  document.getElementById('areaValue').textContent = totalArea.toFixed(2);
+  const displayTotalArea = useFeet ? squareMetersToSquareFeet(totalArea).toFixed(2) : totalArea.toFixed(2);
+  const areaUnit = useFeet ? 'square feet' : 'square meters';
+  
+  // Update the area display with proper units
+  const areaDisplay = document.getElementById('areaDisplay');
+  areaDisplay.innerHTML = `<strong>Total Area:</strong> <span id="areaValue">${displayTotalArea}</span> ${areaUnit}`;
+  
+  console.log('- Area value set to:', displayTotalArea);
   
   if (drawnPolygons.length > 0) {
     document.getElementById('areaSummary').style.display = 'block';
     document.getElementById('areaDetails').innerHTML = summaryHtml;
+    console.log('- Area summary displayed');
   } else {
     document.getElementById('areaSummary').style.display = 'none';
+    console.log('- Area summary hidden');
   }
 
+  console.log('- Calling updatePersonCapacity');
   updatePersonCapacity();
 }
 
@@ -370,9 +628,73 @@ document.getElementById('densitySlider').addEventListener('input', function() {
   updatePersonCapacity();
 });
 
+// Unit toggle event listener
+document.getElementById('unitBtn').addEventListener('click', function() {
+  const densitySlider = document.getElementById('densitySlider');
+  const currentDensity = parseFloat(densitySlider.value);
+  
+  useFeet = !useFeet;
+  this.textContent = useFeet ? 'Units: Feet' : 'Units: Meters';
+  
+  // Convert density value when switching units
+  // When switching to feet, density should be per square foot instead of per square meter
+  // 1 m² = 10.7639 ft², so density in ft² = density in m² / 10.7639
+  if (useFeet) {
+    densitySlider.value = (currentDensity / 10.7639).toFixed(2);
+  } else {
+    densitySlider.value = (currentDensity * 10.7639).toFixed(2);
+  }
+  
+  // Update density display
+  const densityValue = document.getElementById('densityValue');
+  densityValue.textContent = densitySlider.value;
+  densityValue.nextSibling.textContent = useFeet ? ' p/ft²' : ' p/m²';
+  
+  // Better to call updateTotalArea which will update everything
+  updateTotalArea();
+  
+  // Update existing features on map
+  updateFeatureStyles();
+});
+
+function updateFeatureStyles() {
+  // Update styles for all drawn features
+  drawnPolygons.forEach(polygon => {
+    const geometry = polygon.feature.getGeometry();
+    if (geometry.getType() === 'Circle') {
+      // Recalculate radius display using geodesic distance
+      const center = geometry.getCenter();
+      const radius = geometry.getRadius();
+      const edgeCoord = [center[0] + radius, center[1]];
+      const geodesicRadius = getGeodesicDistance(center, edgeCoord);
+      const displayRadius = useFeet ? metersToFeet(geodesicRadius).toFixed(2) : geodesicRadius.toFixed(2);
+      const unit = useFeet ? 'ft' : 'm';
+      
+      polygon.feature.setStyle(new ol.style.Style({
+        fill: new ol.style.Fill({color: 'rgba(0, 255, 0, 0.2)'}),
+        stroke: new ol.style.Stroke({color: 'green', width: 2}),
+        text: new ol.style.Text({
+          text: `Radius: ${displayRadius} ${unit}`,
+          fill: new ol.style.Fill({color: 'black'}),
+          stroke: new ol.style.Stroke({color: 'white', width: 3}),
+          font: 'bold 12px Arial',
+          placement: 'point',
+          offsetY: -20
+        }),
+        geometry: new ol.geom.Point(center)
+      }));
+    } else if (geometry.getType() === 'Polygon') {
+      // For polygons, we need to update the distance labels
+      // This is more complex as the style function is used during drawing
+      // For now, just update the area display which is done by updateTotalArea
+    }
+  });
+}
+
 function updatePersonCapacity() {
   const density = parseFloat(document.getElementById('densitySlider').value);
   const totalArea = parseFloat(document.getElementById('areaValue').textContent);
+  // If useFeet, totalArea is in sqft, so density is per sqft
   const personCount = Math.round(totalArea * density);
   document.getElementById('personValue').textContent = personCount;
   
@@ -464,4 +786,202 @@ function constrainToTriangle(coordinates) {
   triangleCoords.push(triangleCoords[0]); // Close the triangle
   
   return [triangleCoords];
+}
+
+// Message handler for communication with parent window
+window.addEventListener('message', function(event) {
+  const data = event.data;
+  
+  switch(data.type) {
+    case 'recalculateAreas':
+      // Recalculate areas from restored features
+      recalculateAreasFromFeatures();
+      break;
+    case 'updateArea':
+      // Handle area updates from drawing interactions
+      updateTotalArea();
+      break;
+  }
+});
+
+// Function to recalculate areas from restored features
+function recalculateAreasFromFeatures() {
+  // Clear existing polygons array
+  drawnPolygons = [];
+  polygonCounter = 1;
+  
+  // Get all features from parent map
+  const features = window.parent.vectorSource.getFeatures();
+  const polygonFeatures = [];
+  
+  // First, collect all polygon features
+  features.forEach(feature => {
+    if (!feature.get('type') || feature.get('type') !== 'routing-marker') {
+      const geometry = feature.getGeometry();
+      if (geometry.getType() === 'Polygon') {
+        polygonFeatures.push(feature);
+      }
+    }
+  });
+  
+  // Sort polygons by geodesic area (smaller first, so potential holes are processed before larger containers)
+  polygonFeatures.sort((a, b) => {
+    return getGeodesicArea(a.getGeometry()) - getGeodesicArea(b.getGeometry());
+  });
+  
+  // Fallback: If geometric containment fails, use area-based heuristic
+  // This handles cases where coordinate systems or precision issues prevent proper containment detection
+  if (polygonFeatures.length >= 2) {
+    const areas = polygonFeatures.map(f => getGeodesicArea(f.getGeometry()));
+    const maxArea = Math.max(...areas);
+    const minArea = Math.min(...areas);
+    const areaRatio = minArea / maxArea;
+    
+    console.log(`Area-based hole detection: min=${minArea.toFixed(0)}, max=${maxArea.toFixed(0)}, ratio=${areaRatio.toFixed(3)}`);
+    
+    // If smallest polygon is less than 80% of the largest, assume it's a hole
+    if (areaRatio < 0.8) {
+      console.log('APPLYING AREA-BASED HOLE DETECTION');
+      const smallerFeature = polygonFeatures[0];
+      const largerFeature = polygonFeatures[1];
+      
+      // Style smaller as hole
+      smallerFeature.setStyle(new ol.style.Style({
+        fill: new ol.style.Fill({color: 'rgba(255, 0, 0, 0.2)'}),
+        stroke: new ol.style.Stroke({color: 'red', width: 2})
+      }));
+      
+      // Style larger as outer polygon
+      largerFeature.setStyle(new ol.style.Style({
+        fill: new ol.style.Fill({color: 'rgba(0, 255, 0, 0.2)'}),
+        stroke: new ol.style.Stroke({color: 'green', width: 2}),
+        text: new ol.style.Text({
+          text: '1',
+          fill: new ol.style.Fill({color: 'black'}),
+          stroke: new ol.style.Stroke({color: 'white', width: 3}),
+          font: 'bold 16px Arial',
+          placement: 'point'
+        })
+      }));
+      
+      // Add to drawn polygons with hole subtraction
+      drawnPolygons.push({
+        feature: largerFeature,
+        geometry: largerFeature.getGeometry(),
+        holes: [{
+          area: getGeodesicArea(smallerFeature.getGeometry()),
+          geometry: smallerFeature.getGeometry().clone()
+        }],
+        number: 1
+      });
+      
+      // Process remaining polygons as separate outer polygons
+      for (let i = 2; i < polygonFeatures.length; i++) {
+        const feature = polygonFeatures[i];
+        const polygonNumber = polygonCounter++;
+        feature.setStyle(new ol.style.Style({
+          fill: new ol.style.Fill({color: 'rgba(0, 255, 0, 0.2)'}),
+          stroke: new ol.style.Stroke({color: 'green', width: 2}),
+          text: new ol.style.Text({
+            text: polygonNumber.toString(),
+            fill: new ol.style.Fill({color: 'black'}),
+            stroke: new ol.style.Stroke({color: 'white', width: 3}),
+            font: 'bold 16px Arial',
+            placement: 'point'
+          })
+        }));
+        
+        drawnPolygons.push({
+          feature: feature,
+          geometry: feature.getGeometry(),
+          holes: [],
+          number: polygonNumber
+        });
+      }
+      
+      updateTotalArea();
+      return;
+    }
+  }
+  
+  // Process each polygon to determine if it's a hole or outer polygon
+  polygonFeatures.forEach(feature => {
+    const geometry = feature.getGeometry();
+    const coordinates = geometry.getCoordinates()[0]; // Outer ring only
+    let isHole = false;
+    let parentPolygon = null;
+    
+    // Check if this polygon is completely inside any existing outer polygon
+    for (let polygon of drawnPolygons) {
+      const parentCoords = polygon.geometry.getCoordinates()[0];
+      let allPointsInside = true;
+      let pointsChecked = 0;
+      let pointsInside = 0;
+      
+      console.log(`Checking containment: smaller polygon (${getGeodesicArea(geometry).toFixed(0)} sqm) vs parent (${getGeodesicArea(polygon.geometry).toFixed(0)} sqm)`);
+      console.log(`Smaller polygon coords sample:`, coordinates.slice(0, 3));
+      console.log(`Parent polygon coords sample:`, parentCoords.slice(0, 3));
+      
+      for (let coord of coordinates) {
+        pointsChecked++;
+        const isInside = isPointInPolygon(coord, parentCoords);
+        if (!isInside) {
+          allPointsInside = false;
+          console.log(`Point ${pointsChecked} FAILED:`, coord, 'not inside parent');
+          break;
+        } else {
+          pointsInside++;
+        }
+      }
+      
+      console.log(`Containment check result: ${allPointsInside} (${pointsInside}/${pointsChecked} points inside)`);
+      
+      if (allPointsInside) {
+        isHole = true;
+        parentPolygon = polygon;
+        console.log('DETECTED AS HOLE!');
+        break;
+      }
+    }
+    
+    if (isHole && parentPolygon) {
+      // This is a hole - style it red and subtract its area from parent
+      feature.setStyle(new ol.style.Style({
+        fill: new ol.style.Fill({color: 'rgba(255, 0, 0, 0.2)'}),
+        stroke: new ol.style.Stroke({color: 'red', width: 2})
+      }));
+      
+      // Add hole area to parent (area will be subtracted in updateTotalArea)
+      const holeArea = getGeodesicArea(geometry);
+      parentPolygon.holes.push({
+        area: holeArea,
+        geometry: geometry.clone()
+      });
+    } else {
+      // This is an outer polygon
+      const polygonNumber = polygonCounter++;
+      feature.setStyle(new ol.style.Style({
+        fill: new ol.style.Fill({color: 'rgba(0, 255, 0, 0.2)'}),
+        stroke: new ol.style.Stroke({color: 'green', width: 2}),
+        text: new ol.style.Text({
+          text: polygonNumber.toString(),
+          fill: new ol.style.Fill({color: 'black'}),
+          stroke: new ol.style.Stroke({color: 'white', width: 3}),
+          font: 'bold 16px Arial',
+          placement: 'point'
+        })
+      }));
+      
+      // Add as new outer polygon
+      drawnPolygons.push({
+        feature: feature,
+        geometry: geometry,
+        holes: [],
+        number: polygonNumber
+      });
+    }
+  });
+  
+  // Update total area display
+  updateTotalArea();
 }
