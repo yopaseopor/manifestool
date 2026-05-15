@@ -190,58 +190,74 @@
 
 @media screen and (max-width: 768px) {
     .container {
-        flex-direction: row; /* Keep horizontal for 50/50 */
+        flex-direction: column;
+        height: 100%;
     }
 
     .sidebar {
-        width: 50%; /* Each sidebar takes 50% width when active */
-        padding: 10px; /* Adjust padding for mobile */
-        /* Ensure it's not hidden by default if meant to be visible */
-        /* The 'hidden' class should still work to hide inactive sidebars */
-    }
-
-    .main {
-        width: 50%; /* Map takes 50% width when a sidebar is active */
-        flex: none; /* Override flex: 1 behavior for 50% width */
-    }
-
-    /* Override .main.expanded for mobile view when a sidebar is active */
-    .sidebar:not(.hidden) + .main.expanded {
-        width: 50%;
-        flex: none;
-    }
-    
-    /* When no sidebar is active, main should be 100% */
-    .sidebar.hidden + .main {
         width: 100%;
-        flex: none; /* Ensure flex property is overridden if set elsewhere */
+        height: 50%; /* Only apply height if it's not hidden */
+        padding: 10px;
+        order: 2; /* Sidebar below map */
+        box-sizing: border-box; /* Crucial for padding/border not adding to total size */
+        overflow-y: auto; /* Ensure scrolling if content overflows */
     }
 
-    /* Adjust the general positioning of ol-controls for smaller screens if needed */
+    /* Explicitly ensure active sidebar is displayed as flex */
+    .sidebar:not(.hidden) {
+        display: flex;
+        flex-direction: column; /* To manage internal content of sidebar */
+    }
+
+    /* The main content area */
+    .main {
+        width: 100%;
+        flex: none; /* Override flex: 1 outside media query */
+        box-sizing: border-box;
+        order: 1; /* Map above sidebar */
+    }
+
+    /* When a sidebar is ACTIVE, .main is NOT .expanded, so main gets 50% height */
+    .main:not(.expanded) {
+        height: 50%;
+    }
+
+    /* When NO sidebar is active, .main IS .expanded, so main gets 100% height */
+    .main.expanded {
+        height: 100%;
+    }
+
+    /* Adjust the general positioning of ol-controls for smaller screens */
+    /* Reset previous adjustments for horizontal layout */
     .ol-control.ol-layer,
     .ol-control.ol-search,
     .ol-control.ol-r-button,
     .ol-control.ol-d-button,
     .ol-control.ol-share-button {
-        top: auto; /* Remove fixed top positioning */
-        left: auto; /* Remove fixed left positioning */
-        right: 0.5em; /* Position on the right for better thumb access */
-        margin-bottom: 0.5em; /* Stack vertically from bottom */
+        top: auto;
+        bottom: auto;
+        left: 0.5em;
+        right: auto;
+        margin-bottom: 0;
     }
 
-    /* Stack custom controls vertically from bottom on the right side */
-    .ol-control.ol-share-button { bottom: 0.5em; }
-    .ol-control.ol-d-button    { bottom: 5.5em; }
-    .ol-control.ol-r-button    { bottom: 10.5em; }
-    .ol-control.ol-search     { bottom: 15.5em; }
-    .ol-control.ol-layer      { bottom: 20.5em; }
+    /* Adjust the custom controls to stack vertically on the left/right of the map */
+    .ol-control.ol-layer { top: 0.5em; left: 0.5em; }
+    .ol-control.ol-search { top: 5.5em; left: 0.5em; }
+    .ol-control.ol-r-button { top: 10.5em; left: 0.5em; }
+    .ol-control.ol-d-button { top: 15.5em; left: 0.5em; }
+    .ol-control.ol-share-button { top: 20.5em; left: 0.5em; }
+
+    /* Keep zoom controls on top-left of the map */
     .ol-zoom {
         top: 0.5em;
-        left: 0.5em; /* Keep zoom controls on top-left */
+        left: 0.5em;
     }
+    /* Keep rotate on top-right of the map */
     .ol-rotate {
         top: 0.5em;
-        right: 0.5em; /* Keep rotate on top-right */
+        right: 0.5em;
+        left: auto;
     }
 }
     </style>
