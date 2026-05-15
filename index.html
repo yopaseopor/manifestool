@@ -234,29 +234,32 @@
     .ol-control.ol-r-button,
     .ol-control.ol-d-button,
     .ol-control.ol-share-button {
-        top: auto;
-        bottom: auto;
-        left: 0.5em;
-        right: auto;
+        position: absolute; /* Ensure absolute positioning */
+        top: 0.5em; /* Align to the top */
+        left: auto; /* Remove left positioning */
+        right: auto; /* Remove right positioning */
         margin-bottom: 0;
+        transform: translateX(0); /* Reset any transforms */
+        display: inline-block; /* Make them flow horizontally */
     }
 
-    /* Adjust the custom controls to stack vertically on the left/right of the map */
-    .ol-control.ol-layer { top: 0.5em; left: 0.5em; }
-    .ol-control.ol-search { top: 5.5em; left: 0.5em; }
-    .ol-control.ol-r-button { top: 10.5em; left: 0.5em; }
-    .ol-control.ol-d-button { top: 15.5em; left: 0.5em; }
-    .ol-control.ol-share-button { top: 20.5em; left: 0.5em; }
+    /* Specific horizontal adjustments */
+    .ol-control.ol-layer { right: 0.5em; } /* Place layer selector first on the right */
+    .ol-control.ol-share-button { right: 5.5em; } /* Then share button */
+    .ol-control.ol-d-button { right: 10.5em; } /* Then draw button */
+    .ol-control.ol-r-button { right: 15.5em; } /* Then routing button */
+    .ol-control.ol-search { right: 20.5em; } /* Then search button */
 
     /* Keep zoom controls on top-left of the map */
     .ol-zoom {
         top: 0.5em;
         left: 0.5em;
+        right: auto;
     }
-    /* Keep rotate on top-right of the map */
+    /* Keep rotate on top-right of the map, ensuring it doesn't conflict with other controls */
     .ol-rotate {
         top: 0.5em;
-        right: 0.5em;
+        right: 25.5em; /* Adjust right position to avoid collision with other buttons */
         left: auto;
     }
 }

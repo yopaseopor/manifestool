@@ -918,7 +918,7 @@ window.addEventListener('message', function(event) {
       }
       drawInteraction = new ol.interaction.Draw({
         source: vectorSource,
-        type: 'Polygon'
+        type: data.geometryType // Use geometryType from message
       });
       
       drawInteraction.on('drawstart', function(event) {
@@ -938,6 +938,11 @@ window.addEventListener('message', function(event) {
       });
       
       map.addInteraction(drawInteraction);
+      // Make drawFrame transparent to mouse events when drawing starts
+      const drawFrameStart = document.getElementById('drawFrame');
+      if (drawFrameStart) {
+        drawFrameStart.style.pointerEvents = 'none';
+      }
       break;
       
     case 'finishDrawing':
@@ -946,6 +951,11 @@ window.addEventListener('message', function(event) {
         map.removeInteraction(drawInteraction);
         drawInteraction = null;
         drawSketch = null;
+      }
+      // Restore pointer events on drawFrame
+      const drawFrameFinish = document.getElementById('drawFrame');
+      if (drawFrameFinish) {
+        drawFrameFinish.style.pointerEvents = 'auto';
       }
       break;
       
@@ -956,6 +966,11 @@ window.addEventListener('message', function(event) {
           vectorSource.removeFeature(feature);
         }
       });
+      // Restore pointer events on drawFrame
+      const drawFrameClear = document.getElementById('drawFrame');
+      if (drawFrameClear) {
+        drawFrameClear.style.pointerEvents = 'auto';
+      }
       break;
       
     case 'searchResultClick':
