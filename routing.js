@@ -67,7 +67,6 @@ function updateWaypointUI() {
   if (!waypointList.hasAttribute('data-dragover-added')) {
     waypointList.addEventListener('dragover', function(event) {
       event.preventDefault();
-      console.log('Waypoint list dragover');
     });
     waypointList.setAttribute('data-dragover-added', 'true');
   }
@@ -100,7 +99,6 @@ function updateWaypointUI() {
 
     div.addEventListener('dragstart', function(event) {
       if (waypoint.type === 'waypoint') {
-        console.log('Drag start for waypoint id:', waypoint.id);
         event.dataTransfer.setData('text/plain', waypoint.id);
         draggedElement = event.target;
       }
@@ -172,12 +170,9 @@ function handleDragOver(e) {
 }
 
 function handleDrop(e) {
-  console.log('handleDrop called');
   e.preventDefault();
 
   const target = e.target.closest('.waypoint-item');
-  console.log('target:', target);
-  console.log('draggedElement:', draggedElement);
   if (target && target !== draggedElement && target.draggable) {
     const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
     const targetIndex = parseInt(target.dataset.index);
@@ -199,7 +194,6 @@ function handleDrop(e) {
     // Reorder waypoints array
     const [draggedWaypoint] = waypoints.splice(draggedIndex, 1);
     waypoints.splice(insertIndex, 0, draggedWaypoint);
-    console.log('Waypoints after reorder:', waypoints.map(w => ({type: w.type, id: w.id})));
 
     // Update UI and markers
     updateWaypointUI();
@@ -280,15 +274,11 @@ document.getElementById('routeBtn').addEventListener('click', function() {
 
 // Calculate route function
 async function calculateRoute() {
-  console.log('calculateRoute called');
   const transportMode = document.getElementById('transportMode').value;
-  console.log('Transport mode:', transportMode);
 
   // Check if we have waypoints set
   const startWaypoint = waypoints.find(w => w.type === 'start');
   const endWaypoint = waypoints.find(w => w.type === 'end');
-  console.log('Start waypoint:', startWaypoint);
-  console.log('End waypoint:', endWaypoint);
 
   if (!startWaypoint || !endWaypoint) {
     alert('Please set both start and end points by clicking on the map or entering locations');
@@ -311,10 +301,9 @@ async function calculateRoute() {
       waypointCoords.push(`${wp.lon},${wp.lat}`);
     });
 
-    // Add end
-    waypointCoords.push(`${endWaypoint.lon},${endWaypoint.lat}`);
+        // Add end
 
-    console.log('Waypoint coordinates:', waypointCoords);
+        waypointCoords.push(`${endWaypoint.lon},${endWaypoint.lat}`);
 
     // Map transport mode to OSRM profile
     const profileMap = {
@@ -326,8 +315,6 @@ async function calculateRoute() {
 
     const profile = profileMap[transportMode];
     const coordString = waypointCoords.join(';');
-    console.log('API URL profile:', profile);
-    console.log('Coordinate string:', coordString);
 
     // Get route from OSRM (steps=true to get turn-by-turn instructions)
     let routeResponse;
@@ -337,11 +324,7 @@ async function calculateRoute() {
       routeResponse = await fetch(`https://router.project-osrm.org/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`);
     }
 
-    console.log('Route response status:', routeResponse.status);
-    console.log('Route response ok:', routeResponse.ok);
-
     const routeData = await routeResponse.json();
-    console.log('Route data:', routeData);
 
     if (!routeData.routes || routeData.routes.length === 0) {
       alert('No route found');
@@ -350,11 +333,9 @@ async function calculateRoute() {
 
     const route = routeData.routes[0];
     const geometry = route.geometry;
-    console.log('Route geometry:', geometry);
 
     // Decode polyline
     const coordinates = decodePolyline(geometry);
-    console.log('Decoded coordinates length:', coordinates.length);
 
     // Send route data to parent window
     window.parent.postMessage({
@@ -369,48 +350,72 @@ async function calculateRoute() {
     const distance = (route.distance / 1000).toFixed(2);
     const duration = Math.round(route.duration / 60);
     let stepsHtml = '';
-    if (route.legs && route.legs[0] && route.legs[0].steps) {
+    if (route.legs && route.legs.length > 0) {
       stepsHtml = '<h4 style="margin-top:10px;margin-bottom:5px;">Directions</h4>';
-      stepsHtml += '<ol style="margin:0;padding-left:18px;font-size:12px;">';
-      route.legs[0].steps.forEach((step, si) => {
-        const stepDist = (step.distance).toFixed(0);
-        const stepDur = Math.round(step.duration);
-        const instruction = step.maneuver ? step.maneuver.instruction : step.name || '';
-        const maneuverType = step.maneuver ? step.maneuver.type : null;
-        const mod = step.maneuver ? (step.maneuver.modifier || '') : '';
-        const streetName = step.name || step.ref || '';
-        
-        // Build icon
-        let icon = '➡️ ';
-        if (maneuverType === 'depart') icon = '🟢 ';
-        else if (maneuverType === 'arrive') icon = '🔴 ';
-        else if (maneuverType === 'turn' && mod) icon = mod.includes('left') ? '⬅️ ' : '➡️ ';
-        else if (maneuverType === 'roundabout' || maneuverType === 'rotary') icon = '🔄 ';
-        else if (maneuverType === 'merge') icon = '🔀 ';
-        else if (maneuverType === 'fork') icon = '↗️ ';
-        else if (maneuverType === 'end of road') icon = '↪️ ';
-        
-        // Build description
-        let description = '';
-        if (maneuverType === 'depart') {
-          description = `Head ${mod || 'forward'} on ${streetName || 'the road'}`;
-        } else if (maneuverType === 'arrive') {
-          description = `Arrive at destination`;
-        } else if (maneuverType === 'roundabout') {
-          const exit = step.maneuver.exit || 1;
-          description = `Take exit ${exit} toward ${streetName || 'the road'}`;
-        } else if (maneuverType === 'turn') {
-          description = `Turn ${mod} onto ${streetName || 'the road'}`;
-        } else if (maneuverType === 'continue') {
-          description = `Continue onto ${streetName || 'the road'}`;
-        } else if (streetName) {
-          description = instruction || `Continue on ${streetName}`;
-        } else {
-          description = instruction || 'Continue';
+      route.legs.forEach((leg, legIndex) => {
+        const legStartWaypoint = waypoints.find(wp =>
+          wp.lat === leg.steps[0].maneuver.location[1] &&
+          wp.lon === leg.steps[0].maneuver.location[0]
+        );
+        const legEndWaypoint = waypoints.find(wp =>
+          wp.lat === leg.steps[leg.steps.length - 1].maneuver.location[1] &&
+          wp.lon === leg.steps[leg.steps.length - 1].maneuver.location[0]
+        );
+
+        let legHeader = `Leg ${legIndex + 1}`;
+        if (legStartWaypoint && legEndWaypoint) {
+            const startAddr = legStartWaypoint.address && (legStartWaypoint.address.street || legStartWaypoint.address.municipality || legStartWaypoint.address.full);
+            const endAddr = legEndWaypoint.address && (legEndWaypoint.address.street || legEndWaypoint.address.municipality || legEndWaypoint.address.full);
+            if (startAddr && endAddr) {
+                legHeader += `: ${startAddr} to ${endAddr}`;
+            } else if (startAddr) {
+                legHeader += `: From ${startAddr}`;
+            } else if (endAddr) {
+                legHeader += `: To ${endAddr}`;
+            }
         }
-        stepsHtml += `<li>${icon}${description} <span style="color:#888;font-size:10px;">(${stepDist}m)</span></li>`;
+        stepsHtml += `<h5 style="margin-top:10px;margin-bottom:5px; font-size:13px;">${legHeader}</h5>`;
+        stepsHtml += '<ol style="margin:0;padding-left:18px;font-size:12px;">';
+        leg.steps.forEach((step, si) => {
+          const stepDist = (step.distance).toFixed(0);
+          const stepDur = Math.round(step.duration);
+          const instruction = step.maneuver ? step.maneuver.instruction : step.name || '';
+          const maneuverType = step.maneuver ? step.maneuver.type : null;
+          const mod = (step.maneuver && step.maneuver.modifier) ? step.maneuver.modifier : '';
+          const streetName = step.name || step.ref || '';
+          
+          // Build icon
+          let icon = '➡️ ';
+          if (maneuverType === 'depart') icon = '🟢 ';
+          else if (maneuverType === 'arrive') icon = '🔴 ';
+          else if (maneuverType === 'turn' && mod) icon = mod.includes('left') ? '⬅️ ' : '➡️ ';
+          else if (maneuverType === 'roundabout' || maneuverType === 'rotary') icon = '🔄 ';
+          else if (maneuverType === 'merge') icon = '🔀 ';
+          else if (maneuverType === 'fork') icon = '↗️ ';
+          else if (maneuverType === 'end of road') icon = '↪️ ';
+          
+          // Build description
+          let description = '';
+          if (maneuverType === 'depart') {
+            description = `Head ${mod || 'forward'} on ${streetName || 'the road'}`;
+          } else if (maneuverType === 'arrive') {
+            description = `Arrive at destination`;
+          } else if (maneuverType === 'roundabout') {
+            const exit = step.maneuver.exit || 1;
+            description = `Take exit ${exit} toward ${streetName || 'the road'}`;
+          } else if (maneuverType === 'turn') {
+            description = `Turn ${mod} onto ${streetName || 'the road'}`;
+          } else if (maneuverType === 'continue') {
+            description = `Continue onto ${streetName || 'the road'}`;
+          } else if (streetName) {
+            description = instruction || `Continue on ${streetName}`;
+          } else {
+            description = instruction || 'Continue';
+          }
+          stepsHtml += `<li>${icon}${description} <br><span style="font-size:11px; color:#555;">${streetName || 'Unnamed Road'} (${stepDist}m)</span></li>`;
+        });
+        stepsHtml += '</ol>';
       });
-      stepsHtml += '</ol>';
     }
     
     document.getElementById('routeInfo').innerHTML = `
@@ -419,10 +424,10 @@ async function calculateRoute() {
         <span style="font-size:13px;">Distance: ${distance} km &middot; ${duration} min</span><br>
         <span style="font-size:12px;color:#666;">${transportMode.charAt(0).toUpperCase() + transportMode.slice(1)} &middot; ${waypointCoords.length} waypoints</span>
       </div>
-      ${stepsHtml}
+      <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+        ${stepsHtml}
+      </div>
     `;
-
-    console.log('Route calculation completed successfully');
 
   } catch (error) {
     console.error('Routing error:', error);
@@ -437,10 +442,6 @@ window.addEventListener('message', function(event) {
   switch(data.type) {
     case 'mapClick':
       handleMapClick(data.lonLat);
-      break;
-
-    case 'updateRouteInfo':
-      updateRouteInfo(data);
       break;
 
     case 'loadWaypoints':
@@ -646,17 +647,6 @@ function handleMapClick(coordinate) {
   }
 }
 
-// Update route info display
-function updateRouteInfo(data) {
-  document.getElementById('routeInfo').innerHTML = `
-    <h4>Route Details</h4>
-    <p>Distance: ${data.distance} km</p>
-    <p>Estimated time: ${data.duration} minutes</p>
-    <p>Transport: ${data.transportMode.charAt(0).toUpperCase() + data.transportMode.slice(1)}</p>
-    <p>Waypoints: ${data.waypointCount}</p>
-  `;
-}
-
 // Polyline decoding function
 function decodePolyline(encoded) {
   const points = [];
@@ -687,3 +677,4 @@ function decodePolyline(encoded) {
   }
   return points;
 }
+

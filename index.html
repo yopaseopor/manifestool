@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenLayers Map</title>
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+	<title>Manifestool</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@latest/dist/ol.css">
     <style>
         body, html {
@@ -118,6 +119,74 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
+/* General OpenLayers control buttons */
+.ol-control button,
+.ol-control select {
+    font-size: 1.2em; /* Increase font size */
+    padding: 8px 12px; /* Increase padding */
+    margin: 5px; /* Add margin for separation */
+    min-width: 40px; /* Ensure a minimum width */
+    height: 40px; /* Ensure a consistent height */
+    box-sizing: border-box; /* Include padding and border in element's total width and height */
+    line-height: 1; /* Adjust line height */
+    display: flex; /* Use flexbox for centering content */
+    align-items: center; /* Center content vertically */
+    justify-content: center; /* Center content horizontally */
+}
+
+/* Specific adjustments for zoom buttons (OpenLayers default classes) */
+.ol-zoom-in,
+.ol-zoom-out {
+    font-size: 1.8em; /* Make zoom icons larger */
+    font-weight: bold;
+    width: 45px; /* Larger circular buttons */
+    height: 45px;
+    border-radius: 50%; /* Make them circular */
+}
+
+/* Adjust position for better mobile access (example, might need fine-tuning) */
+.ol-zoom {
+    top: 0.5em;
+    left: 0.5em;
+}
+.ol-rotate {
+    top: 0.5em;
+    right: 0.5em;
+}
+
+/* Styles for the specific icon buttons (search, routing, drawing, share) */
+.ol-search button,
+.ol-r-button button,
+.ol-d-button button,
+.ol-share-button button {
+    font-size: 1.8em; /* Bigger icons */
+    width: 45px;
+    height: 45px;
+    border-radius: 50%; /* Circular buttons */
+}
+
+/* Adjust positioning of custom controls if they are stacking */
+/* This assumes custom controls are added sequentially and might need custom wrappers in HTML */
+.ol-control.ol-layer {
+    top: 5.5em; /* Position below zoom controls */
+    left: 0.5em;
+}
+.ol-control.ol-search {
+    top: 10.5em; /* Position below layer selector */
+    left: 0.5em;
+}
+.ol-control.ol-r-button {
+    top: 15.5em; /* Position below search */
+    left: 0.5em;
+}
+.ol-control.ol-d-button {
+    top: 20.5em; /* Position below routing */
+    left: 0.5em;
+}
+.ol-control.ol-share-button {
+    top: 25.5em; /* Position below drawing */
+    left: 0.5em;
+}
     </style>
 </head>
 <body>
