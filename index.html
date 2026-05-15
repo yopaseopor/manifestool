@@ -187,6 +187,63 @@
     top: 25.5em; /* Position below drawing */
     left: 0.5em;
 }
+
+@media screen and (max-width: 768px) {
+    .container {
+        flex-direction: row; /* Keep horizontal for 50/50 */
+    }
+
+    .sidebar {
+        width: 50%; /* Each sidebar takes 50% width when active */
+        padding: 10px; /* Adjust padding for mobile */
+        /* Ensure it's not hidden by default if meant to be visible */
+        /* The 'hidden' class should still work to hide inactive sidebars */
+    }
+
+    .main {
+        width: 50%; /* Map takes 50% width when a sidebar is active */
+        flex: none; /* Override flex: 1 behavior for 50% width */
+    }
+
+    /* Override .main.expanded for mobile view when a sidebar is active */
+    .sidebar:not(.hidden) + .main.expanded {
+        width: 50%;
+        flex: none;
+    }
+    
+    /* When no sidebar is active, main should be 100% */
+    .sidebar.hidden + .main {
+        width: 100%;
+        flex: none; /* Ensure flex property is overridden if set elsewhere */
+    }
+
+    /* Adjust the general positioning of ol-controls for smaller screens if needed */
+    .ol-control.ol-layer,
+    .ol-control.ol-search,
+    .ol-control.ol-r-button,
+    .ol-control.ol-d-button,
+    .ol-control.ol-share-button {
+        top: auto; /* Remove fixed top positioning */
+        left: auto; /* Remove fixed left positioning */
+        right: 0.5em; /* Position on the right for better thumb access */
+        margin-bottom: 0.5em; /* Stack vertically from bottom */
+    }
+
+    /* Stack custom controls vertically from bottom on the right side */
+    .ol-control.ol-share-button { bottom: 0.5em; }
+    .ol-control.ol-d-button    { bottom: 5.5em; }
+    .ol-control.ol-r-button    { bottom: 10.5em; }
+    .ol-control.ol-search     { bottom: 15.5em; }
+    .ol-control.ol-layer      { bottom: 20.5em; }
+    .ol-zoom {
+        top: 0.5em;
+        left: 0.5em; /* Keep zoom controls on top-left */
+    }
+    .ol-rotate {
+        top: 0.5em;
+        right: 0.5em; /* Keep rotate on top-right */
+    }
+}
     </style>
 </head>
 <body>
