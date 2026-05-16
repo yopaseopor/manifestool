@@ -317,11 +317,22 @@ async function calculateRoute() {
     const coordString = waypointCoords.join(';');
 
     // Get route from OSRM (steps=true to get turn-by-turn instructions)
-    let routeResponse;
+    let routeUrl;
     if (transportMode === 'foot') {
-      routeResponse = await fetch(`http://routing.openstreetmap.de/routed-foot/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`);
+      routeUrl = `https://routing.openstreetmap.de/routed-foot/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`;
     } else {
-      routeResponse = await fetch(`https://router.project-osrm.org/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`);
+      routeUrl = `https://router.project-osrm.org/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`;
+    }
+
+    let routeResponse = await fetch(routeUrl);
+    if (!routeResponse.ok && transportMode === 'foot') {
+      // Fallback to the public OSRM service for walking if the dedicated foot endpoint is not available.
+      routeUrl = `https://router.project-osrm.org/route/v1/${profile}/${coordString}?overview=full&geometries=polyline&steps=true`;
+      routeResponse = await fetch(routeUrl);
+    }
+
+    if (!routeResponse.ok) {
+      throw new Error(`Routing API error ${routeResponse.status}: ${routeResponse.statusText}`);
     }
 
     const routeData = await routeResponse.json();
